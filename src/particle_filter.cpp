@@ -26,7 +26,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   // Resize already intialized vector.
   particles.resize(num_particles);
   for (int i = 0; i < num_particles; i++) {
-    particles[i].id = i;
+    particles[i].id = 0; // not used.
     particles[i].x = dist_x(gen);
     particles[i].y = dist_y(gen);
     particles[i].theta = dist_theta(gen);
@@ -48,13 +48,25 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 
   // Update new particles position based on velocity and raw rate and also and
   // Gaussian noise.
+
+  // If yaw rate is too small, assume it's zero due to being used in division
+  // which will change the equations.
+  double min_yaw_rate = 1e-3;
+
   for (int i = 0; i < particles.size(); i++) {
-    particles[i].x += (velocity/yaw_rate) * (sin(particles[i].theta + yaw_rate*delta_t)
-                      - sin(particles[i].theta)) + dist_x(gen);
-    particles[i].y += (velocity/yaw_rate) * (cos(particles[i].theta) - cos(particles[i].theta
-                      + yaw_rate*delta_t)) + dist_y(gen);
-    // Okay to use theta in above calculations since it doesn't get updated till here.
-    particles[i].theta += yaw_rate*delta_t + dist_theta(gen);
+
+    if (std::fabs(yaw_rate) < min_yaw_rate) {
+      particles[i].x += velocity * delta_t * cos(particles[i].theta) + dist_x(gen);
+      particles[i].y += velocity * delta_t * sin(particles[i].theta) + dist_y(gen);
+      particles[i].theta += dist_theta(gen);
+    } else {
+      particles[i].x += (velocity/yaw_rate) * (sin(particles[i].theta + yaw_rate*delta_t)
+                        - sin(particles[i].theta)) + dist_x(gen);
+      particles[i].y += (velocity/yaw_rate) * (cos(particles[i].theta) - cos(particles[i].theta
+                        + yaw_rate*delta_t)) + dist_y(gen);
+      // Okay to use theta in above calculations since it doesn't get updated till here.
+      particles[i].theta += yaw_rate * delta_t + dist_theta(gen);
+    }
   }
 }
 
@@ -96,11 +108,11 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 
     for (int j = 0; j < observations.size(); j++) {
       transformed_observations[j].id = 0;
-      transformed_observations[j].x = observations[j].x*cos(particles[i].theta) +
-                                      observations[j].y*sin(particles[i].theta) +
+      transformed_observations[j].x = observations[j].x * cos(particles[i].theta) -
+                                      observations[j].y * sin(particles[i].theta) +
                                       particles[i].x;
-      transformed_observations[j].y = observations[j].x*sin(particles[i].theta) +
-                                      observations[j].y*cos(particles[i].theta) +
+      transformed_observations[j].y = observations[j].x * sin(particles[i].theta) +
+                                      observations[j].y * cos(particles[i].theta) +
                                       particles[i].y;
     }
 
@@ -115,10 +127,10 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       int id_i = 0; // landmarks_in_sensor_range won't need map id since it will be
                     // referenced directly when difference between observations
                     // needs to be calculated.
-      double sensor = sensor_range*1.1; // Add 10% for sensor error.
+      double sensor = sensor_range * 1.2; // Add 20% for sensor error.
 
 
-      if ( (std::abs(particles[i].x - xf) < sensor) && (std::abs(particles[i].y - yf) < sensor) ) {
+      if ( (std::fabs(particles[i].x - xf) < sensor) && (std::fabs(particles[i].y - yf) < sensor) ) {
         LandmarkObs templandmark;
         templandmark.x = xf;
         templandmark.y = yf;
@@ -157,18 +169,16 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 
         double current_weight = numerator / denominator;
 
+
         if (j == 0) {  // First weight, iniialize total weight.
           total_weight = current_weight;
         } else {  // Total weight of particle is sum of weight for each measurement.
           total_weight *= current_weight;
         }
-        //std::cout << "Weight product is " << total_weight << std::endl;
+
       }
       // Update particles weight.
       particles[i].weight = total_weight;
-      std::cout << i << " particles weight is now " << total_weight << std::endl;
-      std::cout << i << " particles x y theta is " << particles[i].x << " " << particles[i].y
-      << " " << particles[i].theta << std::endl;
     } // NOTE: This solution does not update weights when there are no observed
       // measurements but there are landmarks within sensor range of a particle.
 
@@ -207,9 +217,11 @@ void ParticleFilter::resample() {
     particles_resampled.push_back(particles[particle_index]);
   }
 
-  std::cout << "Started with " << particles.size() << " and resamped to "
-  << particles_resampled.size() << std::endl;
 
+  sum_weight = 0;
+  for (int i = 0; i < particles_resampled.size(); i++) {
+    sum_weight += particles_resampled[i].weight;
+  }
   particles = particles_resampled;
 }
 
